@@ -12,10 +12,6 @@ module Statesman
         if !serialized && column_type != 'json'
           raise UnserializedMetadataError,
                 "#{transition_class.name}#metadata is not serialized"
-        elsif serialized && column_type == 'json'
-          raise IncompatibleSerializationError,
-                "#{transition_class.name}#metadata column type cannot be json
-                  and serialized simultaneously"
         end
         @transition_class = transition_class
         @parent_model = parent_model
