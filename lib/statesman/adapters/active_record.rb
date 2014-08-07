@@ -39,7 +39,7 @@ module Statesman
       end
 
       def last
-        @last_transition ||= history.last
+        history.last
       end
 
       private
