@@ -1,3 +1,37 @@
+## v1.0.0.beta2 10 October 2014
+*Breaking changes*
+
+- Rename `ActiveRecordModel` to `ActiveRecordQueries`, to reflect the fact that it mixes in some helpful scopes, but is not required.
+
+## v1.0.0.beta1 9 October 2014
+*Breaking changes*
+
+- Classes which include `ActiveRecordModel` must define an `initial_state` class method.
+
+*Fixes*
+
+- `ActiveRecordModel.in_state` and `ActiveRecordModel.not_in_state` now handle inital states correctly (patch by [@isaacseymour](https://github.com/isaacseymour))
+
+*Additions*
+
+- Transition tables created by generated migrations have `NOT NULL` constraints on `to_state`, `sort_key` and foreign key columns (patch by [@greysteil](https://github.com/greysteil))
+- `before_transition` and `after_transition` allow an array of to states (patch by [@isaacseymour](https://github.com/isaacseymour))
+
+## v0.8.3 2 September 2014
+*Fixes*
+
+- Optimisation for Machine#available_events (patch by [@pacso](https://github.com/pacso))
+
+## v0.8.2 2 September 2014
+*Fixes*
+
+- Stop generating a default value for the metadata column if using MySQL.
+
+## v0.8.1 19 August 2014
+*Fixes*
+
+- Adds check in Machine#transition to make sure the 'to' state is not an empty array (patch by [@barisbalic](https://github.com/barisbalic))
+
 ## v0.8.0 29 June 2014
 *Additions*
 

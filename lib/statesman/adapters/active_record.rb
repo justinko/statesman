@@ -19,10 +19,12 @@ module Statesman
       end
 
       def create(from, to, metadata = {})
+        from = from.to_s
+        to = to.to_s
         create_transition(from, to, metadata)
       rescue ::ActiveRecord::RecordNotUnique => e
         if e.message.include?('sort_key') &&
-          e.message.include?(@transition_class.table_name)
+           e.message.include?(@transition_class.table_name)
           raise TransitionConflictError, e.message
         else raise
         end
@@ -32,7 +34,9 @@ module Statesman
 
       def history
         if transitions_for_parent.loaded?
-          transitions_for_parent.sort_by(&:sort_key)
+          # Workaround for Rails bug which causes infinite loop when sorting
+          # already loaded result set. Introduced in rails/rails@b097ebe
+          transitions_for_parent.to_a.sort_by(&:sort_key)
         else
           transitions_for_parent.order(:sort_key)
         end

@@ -64,7 +64,9 @@ module Statesman
 
       def transition(options = { from: nil, to: nil }, event = nil)
         from = to_s_or_nil(options[:from])
-        to = Array(options[:to]).map { |item| to_s_or_nil(item) }
+        to = array_to_s_or_nil(options[:to])
+
+        raise InvalidStateError, "No to states provided." if to.empty?
 
         successors[from] ||= []
 
@@ -80,44 +82,39 @@ module Statesman
       end
 
       def before_transition(options = { from: nil, to: nil }, &block)
-        from = to_s_or_nil(options[:from])
-        to   = to_s_or_nil(options[:to])
+        add_callback(
+          options.merge(callback_class: Callback, callback_type: :before),
+          &block)
+      end
 
-        validate_callback_condition(from: from, to: to)
-        callbacks[:before] << Callback.new(from: from, to: to, callback: block)
+      def guard_transition(options = { from: nil, to: nil }, &block)
+        add_callback(
+          options.merge(callback_class: Guard, callback_type: :guards),
+          &block)
       end
 
       def after_transition(options = { from: nil, to: nil,
                                        after_commit: false }, &block)
-        from = to_s_or_nil(options[:from])
-        to   = to_s_or_nil(options[:to])
+        callback_type = options[:after_commit] ? :after_commit : :after
 
-        validate_callback_condition(from: from, to: to)
-        phase = options[:after_commit] ? :after_commit : :after
-        callbacks[phase] << Callback.new(from: from, to: to, callback: block)
-      end
-
-      def guard_transition(options = { from: nil, to: nil }, &block)
-        from = to_s_or_nil(options[:from])
-        to   = to_s_or_nil(options[:to])
-
-        validate_callback_condition(from: from, to: to)
-        callbacks[:guards] << Guard.new(from: from, to: to, callback: block)
+        add_callback(
+          options.merge(callback_class: Callback, callback_type: callback_type),
+          &block)
       end
 
       def validate_callback_condition(options = { from: nil, to: nil })
         from = to_s_or_nil(options[:from])
-        to   = to_s_or_nil(options[:to])
+        to   = array_to_s_or_nil(options[:to])
 
-        [from, to].compact.each { |state| validate_state(state) }
-        return if from.nil? && to.nil?
+        ([from] + to).compact.each { |state| validate_state(state) }
+        return if from.nil? && to.empty?
 
         validate_not_from_terminal_state(from)
-        validate_not_to_initial_state(to)
+        to.each { |state| validate_not_to_initial_state(state) }
 
-        return if from.nil? || to.nil?
+        return if from.nil? || to.empty?
 
-        validate_from_and_to_state(from, to)
+        to.each { |state| validate_from_and_to_state(from, state) }
       end
 
       # Check that the 'from' state is not terminal
@@ -146,6 +143,17 @@ module Statesman
 
       private
 
+      def add_callback(options, &block)
+        from = to_s_or_nil(options[:from])
+        to   = array_to_s_or_nil(options[:to])
+        callback_klass = options.fetch(:callback_class)
+        callback_type = options.fetch(:callback_type)
+
+        validate_callback_condition(from: from, to: to)
+        callbacks[callback_type] <<
+          callback_klass.new(from: from, to: to, callback: block)
+      end
+
       def validate_state(state)
         unless states.include?(state.to_s)
           raise InvalidStateError, "Invalid state '#{state}'"
@@ -154,13 +162,17 @@ module Statesman
 
       def validate_initial_state(state)
         unless initial_state.nil?
-          raise InvalidStateError, "Cannot set initial state to '#{state}', " +
+          raise InvalidStateError, "Cannot set initial state to '#{state}', " \
                                    "already defined as #{initial_state}."
         end
       end
 
       def to_s_or_nil(input)
         input.nil? ? input : input.to_s
+      end
+
+      def array_to_s_or_nil(input)
+        Array(input).map { |item| to_s_or_nil(item) }
       end
     end
 
@@ -170,8 +182,8 @@ module Statesman
                       })
       @object = object
       @transition_class = options[:transition_class]
-      @storage_adapter = adapter_class(@transition_class)
-                          .new(@transition_class, object, self)
+      @storage_adapter = adapter_class(@transition_class).new(
+        @transition_class, object, self)
       send(:after_initialize) if respond_to? :after_initialize
     end
 
@@ -249,8 +261,9 @@ module Statesman
     end
 
     def available_events
+      state = current_state
       self.class.events.select do |_, transitions|
-        transitions.key?(current_state)
+        transitions.key?(state)
       end.map(&:first)
     end
 

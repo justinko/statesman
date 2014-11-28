@@ -5,6 +5,8 @@ A statesmanlike state machine library for Ruby 1.9.3 and 2.0.
 [![Gem Version](https://badge.fury.io/rb/statesman.png)](http://badge.fury.io/rb/statesman)
 [![Build Status](https://travis-ci.org/gocardless/statesman.png?branch=master)](https://travis-ci.org/gocardless/statesman)
 [![Code Climate](https://codeclimate.com/github/gocardless/statesman.png)](https://codeclimate.com/github/gocardless/statesman)
+[![Gitter](https://badges.gitter.im/Join Chat.svg)](https://gitter.im/gocardless/statesman?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 
 Statesman is a little different from other state machine libraries which tack
 state behaviour directly onto a model. A statesman state machine is defined as a
@@ -53,7 +55,7 @@ class OrderStateMachine
 end
 
 class Order < ActiveRecord::Base
-  include Statesman::Adapters::ActiveRecordModel
+  include Statesman::Adapters::ActiveRecordQueries
 
   has_many :order_transitions
 
@@ -65,6 +67,10 @@ class Order < ActiveRecord::Base
 
   def self.transition_class
     OrderTransition
+  end
+
+  def self.initial_state
+    :pending
   end
 end
 
@@ -199,6 +205,23 @@ class Order < ActiveRecord::Base
            to: :state_machine
 end
 ```
+#### Using PostgreSQL JSON column
+
+By default, Statesman uses `serialize` to store the metadata in JSON format.
+It is also possible to use the PostgreSQL JSON column if you are using Rails 4. To do that
+
+* Change `metadata` column type in the transition model migration to `json`
+
+  ```ruby
+  # Before
+  t.text :metadata, default: "{}"
+  # After
+  t.json :metadata, default: "{}"
+  ```
+
+* Remove `include Statesman::Adapters::ActiveRecordTransition` statement from your
+  transition model
+
 
 ## Configuration
 
@@ -314,25 +337,125 @@ callback code throws an exception, it will not be caught.)
 
 A mixin is provided for the ActiveRecord adapter which adds scopes to easily
 find all models currently in (or not in) a given state. Include it into your
-model and define a `transition_class` method.
+model and define `transition_class` and `initial_state` class methods:
 
 ```ruby
 class Order < ActiveRecord::Base
-  include Statesman::Adapters::ActiveRecordModel
+  include Statesman::Adapters::ActiveRecordQueries
 
   private
 
   def self.transition_class
     OrderTransition
   end
+
+  def self.initial_state
+    OrderStateMachine.initial_state
+  end
 end
 ```
 
 #### `Model.in_state(:state_1, :state_2, etc)`
-Returns all models currently in any of the supplied states.
+Returns all models currently in any of the supplied states. Prior to 1.0 this ignored all models in the initial state, and the `initial_state` class method was not required.
 
 #### `Model.not_in_state(:state_1, :state_2, etc)`
-Returns all models not currently in any of the supplied states.
+Returns all models not currently in any of the supplied states. Prior to 1.0 this always excluded models in the initial state, and the `initial_state` class method was not required.
+
+## Frequently Asked Questions
+
+#### Storing the state on the model object
+
+If you wish to store the model state on the model directly, you can keep it up to date using an `after_transition` hook:
+
+```ruby
+after_transition do |model, transition|
+  model.state = transition.to_state
+  model.save!
+end
+```
+
+You could also use a calculated column or view in your database.
+
+#### Accessing metadata from the last transition
+
+Given a field `foo` that was stored in the metadata, you can access it like so:
+
+```ruby
+model_instance.last_transition.metadata["foo"]
+```
+
+## Testing Statesman Implementations
+
+This answer was abstracted from [this issue](https://github.com/gocardless/statesman/issues/77).
+
+At GoCardless we focus on testing that:
+- guards correctly prevent / allow transitions
+- callbacks execute when expected and perform the expected actions
+
+#### Testing Guards
+
+Guards can be tested by asserting that `transition_to!` does or does not raise a `Statesman::GuardFailedError`:
+
+```ruby
+describe "guards" do
+  it "cannot transition from state foo to state bar" do
+    expect { some_model.transition_to!(:bar) }.to raise_error(Statesman::GuardFailedError)
+  end
+
+  it "can transition from state foo to state baz" do
+    expect { some_model.transition_to!(:baz).to_not raise_error
+  end
+end
+```
+
+#### Testing Callbacks
+
+Callbacks are tested by asserting that the action they perform occurs:
+
+```ruby
+describe "some callback" do
+  it "adds one to the count property on the model" do
+    expect { some_model.transition_to!(:some_state) }.
+      to change {
+        some_model.reload.count
+      }.by(1)
+  end
+end
+```
+
+#### Creating models in certain states
+
+Sometimes you'll want to test a guard/transition from one state to another, where the state you want to go from is not the initial state of the model. In this instance you'll need to construct a model instance in the state required. However, if you have strict guards, this can be a pain. One way to get around this in tests is to directly create the transitions in the database, hence avoiding the guards.
+
+We use [FactoryGirl](https://github.com/thoughtbot/factory_girl) for creating our test objects. Given an `Order` model that is backed by Statesman, we can easily set it up to be in a particular state:
+
+```ruby
+factory :order do
+  property "value"
+  ...
+
+  trait :shipped do
+    after(:create) do |order|
+      FactoryGirl.create(:order_transition, :shipped, order: order)
+    end
+  end
+end
+
+factory :order_transition do
+  order
+  ...
+
+  trait :shipped do
+    to_state "shipped"
+  end
+end
+```
+
+This means you can easily create an `Order` in the `shipped` state:
+
+```ruby
+let(:shipped_order) { FactoryGirl.create(:order, :shipped) }
+```
 
 ---
 
